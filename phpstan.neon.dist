@@ -1,0 +1,31 @@
+# Committed PHPStan config.
+#
+# phpstan.neon (no .dist) is gitignored and, if present, overrides this
+# file entirely — keep personal tweaks there. This .dist is what CI uses.
+
+includes:
+    - vendor/szepeviktor/phpstan-wordpress/extension.neon
+
+parameters:
+    level: 8
+    # Analyse across the supported range — 8.4 is the floor, 8.5 the
+    # ceiling CI also runs. A single pin proves one end only.
+    phpVersion:
+        min: 80400
+        max: 80500
+    # PHPDoc informs types but does not prove conditions: values here arrive
+    # from HTTP responses, decoded JWTs and $_POST, none of which an
+    # annotation can guarantee.
+    treatPhpDocTypesAsCertain: false
+    paths:
+        - src
+    excludePaths:
+        - tests
+    bootstrapFiles:
+        - vendor/autoload.php
+    # Sentinel is an optional runtime dependency: the logger is a no-op when
+    # wp_log() is absent. Scanning its source makes wp_log() and
+    # Sentinel_Log_Channel resolvable without requiring it through Composer.
+    # Matches Beacon.
+    scanDirectories:
+        - ../sentinel/src
