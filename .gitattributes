@@ -1,2 +1,16 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# What a consumer's `composer install` downloads is GitHub's archive of a tag,
+# which honours export-ignore. Fellowship and Reach ship vendor/ inside their
+# plugin zips, so anything not excluded here ends up on a web server: the test
+# suite (whose bootstrap would be reachable over HTTP), CI config and tooling
+# config. Only src/, composer.json, LICENSE and README.md need to travel.
+/.github            export-ignore
+/tests              export-ignore
+/.gitattributes     export-ignore
+/.gitignore         export-ignore
+/.phpcs.xml.dist    export-ignore
+/phpstan.neon.dist  export-ignore
+/phpunit.xml        export-ignore
+/composer.lock      export-ignore
