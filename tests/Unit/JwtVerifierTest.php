@@ -237,6 +237,30 @@ test('a key that is not RSA is rejected', function () {
     expect(verifyJwt(jwt()))->toBeNull();
 });
 
+test('an empty key id is rejected without a fetch', function () {
+    $header = Tokens::encode(['alg' => 'RS256', 'kid' => '', 'typ' => 'JWT']);
+
+    expect(verifyJwt($header . '.' . Tokens::encode(jwtClaims()) . '.sig'))->toBeNull();
+    expect(FakeWpHttp::callCount())->toBe(0);
+});
+
+test('a key set whose keys are not a list is rejected', function () {
+    FakeWpHttp::pushResponse(200, '{"keys":"not-a-list"}');
+    FakeWpHttp::pushResponse(200, '{"keys":"not-a-list"}');
+
+    expect(verifyJwt(jwt()))->toBeNull();
+});
+
+test('an RSA key missing its modulus is rejected', function () {
+    // The DER is built from n and e; with either empty there is no key to
+    // build, and handing OpenSSL a half-made one would be worse than refusing.
+    $jwks = (string) json_encode(['keys' => [['kid' => JWT_KID, 'kty' => 'RSA', 'n' => '', 'e' => '']]]);
+    FakeWpHttp::pushResponse(200, $jwks);
+    FakeWpHttp::pushResponse(200, $jwks);
+
+    expect(verifyJwt(jwt()))->toBeNull();
+});
+
 /**
  * @param array<string, mixed> $overrides
  * @param list<string>         $remove
