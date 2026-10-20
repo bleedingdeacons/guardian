@@ -20,6 +20,7 @@ It exists because both plugins used to carry their own copy of this code, and th
 | `Providers\GoogleProvider`, `MicrosoftProvider`, `FacebookProvider` | The server-side authorisation-code flow: build the authorization URL, exchange the callback's code, verify the ID token, answer a `VerifiedIdentity` or null. Facebook adds PKCE. Microsoft is pinned to the personal-accounts tenant. |
 | `Providers\AppleProvider` | The client-side flow: verify an ID token the device or Apple's JS SDK obtained itself. |
 | `Providers\OAuthProvider` | The contract all four satisfy. `isServerSide()` says which flow; `requiresPkce()` says whether to mint a verifier. |
+| `Firebase\FirebaseIdTokenVerifier` | A Firebase Auth ID token from a handset's native Google sign-in. Pinned to the consumer's Firebase project and to `google.com` as the sign-in method; the sign-in must be under five minutes old and each token is accepted once, which together stand in for the nonce a native sign-in cannot carry. New in 1.1 and purely additive, so an older copy that another consumer's autoloader supplies first does not break it. |
 | `Jwt\JwtVerifier` | RS256 only; `exp`, `iat`, issuer, audience and nonce all checked; key sets cached an hour, with at most one cache-busting refetch per key set per minute. |
 | `State\StateStore` | Single-use state and nonce in a transient under the consumer's own prefix, carrying the PKCE verifier and whatever else the consumer needs back (`extra`). |
 | `ProviderRegistry` | The providers a consumer accepts. Unregistered means unreachable. |
