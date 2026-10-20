@@ -111,9 +111,8 @@ final class FirebaseIdTokenVerifier
         if (!is_numeric($authTime)) {
             return null;
         }
-        $now = time();
-        if ((int) $authTime > $now + self::CLOCK_SKEW_SECONDS
-            || $now - (int) $authTime > self::MAX_AUTH_AGE_SECONDS + self::CLOCK_SKEW_SECONDS) {
+        $age = time() - (int) $authTime;
+        if ($age < -self::CLOCK_SKEW_SECONDS || $age > self::MAX_AUTH_AGE_SECONDS + self::CLOCK_SKEW_SECONDS) {
             $this->logger->warning('Firebase: sign-in too old to enrol with');
             return null;
         }
