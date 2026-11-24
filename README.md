@@ -18,7 +18,7 @@ It exists because both plugins used to carry their own copy of this code, and th
 | Class | What it does |
 |---|---|
 | `Providers\GoogleProvider`, `MicrosoftProvider`, `FacebookProvider` | The server-side authorisation-code flow: build the authorization URL, exchange the callback's code, verify the ID token, answer a `VerifiedIdentity` or null. Facebook adds PKCE. Microsoft is pinned to the personal-accounts tenant. |
-| `Providers\AppleProvider` | The client-side flow: verify an ID token the device or Apple's JS SDK obtained itself. |
+| `Providers\AppleProvider` | The client-side flow: verify an ID token the device or Apple's JS SDK obtained itself. `verifyIdToken()` answers a `VerifiedIdentity` and needs a verified email; `verifySignIn()` (new in 1.3) answers an `AppleSignIn` keyed on Apple's `sub`, with or without one. See [Apple: sub or email](#apple-sub-or-email). |
 | `Providers\OAuthProvider` | The contract all four satisfy. `isServerSide()` says which flow; `requiresPkce()` says whether to mint a verifier. |
 | `Firebase\FirebaseIdTokenVerifier` | A Firebase Auth ID token from a handset's native Google sign-in. Pinned to the consumer's Firebase project and to `google.com` as the sign-in method; the sign-in must be under five minutes old and each token is accepted once, which together stand in for the nonce a native sign-in cannot carry. New in 1.1 and purely additive, so an older copy that another consumer's autoloader supplies first does not break it. |
 | `Firebase\FirebaseDeviceTokenVerifier` | A Firebase Auth ID token from an enrolled device, signed in with a custom token. Pinned to the consumer's project and to `custom` as the sign-in method. No email, no age limit and not single use, because a device sends the same token on every request until it expires. **It proves only that Google signed the token**: the consumer must still check its own record of the device. New in 1.2, and a class of its own so an older copy another consumer's autoloader supplies first doesn't break it. |
@@ -26,6 +26,7 @@ It exists because both plugins used to carry their own copy of this code, and th
 | `State\StateStore` | Single-use state and nonce in a transient under the consumer's own prefix, carrying the PKCE verifier and whatever else the consumer needs back (`extra`). |
 | `ProviderRegistry` | The providers a consumer accepts. Unregistered means unreachable. |
 | `VerifiedIdentity` | An email address a provider proved the person controls — not yet an authorisation. |
+| `AppleSignIn` | A verified Apple token's `sub`, its email only if present and verified (lower-cased), and whether that is a private relay address. New in 1.3. |
 | `Credentials\CredentialStore` | The interface a consumer's settings class implements so providers can read its client ids and secrets. |
 | `Admin\ProviderCredentialsSection`, `ProviderField` | The client id and secret rows for a consumer's own settings page: `render()` inside its form, `save($_POST)` inside its handler. Secrets are write-only. |
 
@@ -60,6 +61,22 @@ $identity = $providers->get($stored['provider'])
 ```
 
 `$settings` is the consumer's own settings class, implementing `CredentialStore`. Credentials stay with each consumer: each registers its own redirect URI and may hold its own client, and one shared store would let one plugin's misconfiguration break another's sign-in.
+
+### Apple: sub or email
+
+Apple sends the email reliably only on the first authorisation; a returning user's token often has no `email` claim. The two methods verify the token identically (Apple's JWKS, issuer, the consumer's client id as audience, the nonce) and differ only in what they need from the claims:
+
+- **`verifyIdToken()`** — null unless there is a verified email. For a consumer that matches people by address on every sign-in and would rather refuse than guess. Unchanged; Fellowship relies on the refusal.
+- **`verifySignIn()`** — null only if verification fails or `sub` is missing. Answers an `AppleSignIn` whose `email` is set only when present and verified. Link `sub` to your own record on the first sign-in (matched by email), then find the record by `sub`.
+
+```php
+$signIn = $apple->verifySignIn($idToken, $stored['nonce']);
+$member = $signIn === null ? null
+    : ($members->findByAppleSub($signIn->sub)
+        ?? ($signIn->email !== null ? $members->linkAppleSub($signIn->email, $signIn->sub) : null));
+```
+
+`verifySignIn()` is a new method on an existing class, not a new class, so the [two-copies rule](#two-copies-one-class) bites: if the other consumer's older `AppleProvider` loads first, the method is not there. Move both consumers to 1.3 together, or guard with `method_exists()`.
 
 ## Two copies, one class
 
