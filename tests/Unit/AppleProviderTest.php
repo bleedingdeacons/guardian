@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Guardian\Tests\Unit;
 
 use BleedingDeacons\WpMocks\Doubles\FakeWpHttp;
+use Guardian\AppleSignIn;
 use BleedingDeacons\WpMocks\WpState;
 use Guardian\Jwt\JwtVerifier;
 use Guardian\Providers\AppleProvider;
@@ -26,7 +27,7 @@ use Guardian\VerifiedIdentity;
  * together.
  */
 
-covers(AppleProvider::class);
+covers(AppleProvider::class, AppleSignIn::class);
 
 const APPLE_AUDIENCE = 'org.aa-bristol.link';
 const APPLE_NONCE = 'the-issued-nonce';
@@ -106,6 +107,94 @@ test('handling a callback is refused outright', function () {
     // provider was dispatched down the server-side path — a wiring fault.
     appleProvider()->handleCallback('code', 'nonce', 'https://example.org/callback');
 })->throws(\LogicException::class);
+
+// verifySignIn(): a returning user's token carries no email, so the sign-in
+// stands on Apple's stable sub instead.
+
+test('a token with no email still yields the sub', function () {
+    $signIn = appleSignIn(appleToken(remove: ['email', 'email_verified']));
+
+    expect($signIn)->toBeInstanceOf(AppleSignIn::class);
+    expect($signIn?->sub)->toBe('000123.abc.456');
+    expect($signIn?->email)->toBeNull();
+    expect($signIn?->isPrivateRelay)->toBeFalse();
+});
+
+test('verifyIdToken still refuses the token that verifySignIn accepts', function () {
+    // Fellowship relies on this refusal; the new method must not loosen it.
+    expect(appleVerify(appleToken(remove: ['email', 'email_verified'])))->toBeNull();
+});
+
+test('a verified email is kept and lower cased', function () {
+    $signIn = appleSignIn(appleToken(['email' => 'Member@Example.ORG', 'email_verified' => 'true']));
+
+    expect($signIn?->email)->toBe('member@example.org');
+    expect($signIn?->sub)->toBe('000123.abc.456');
+});
+
+test('email verified is accepted as a boolean as well as the string', function () {
+    expect(appleSignIn(appleToken(['email_verified' => true]))?->email)->toBe('member@example.org');
+    expect(appleSignIn(appleToken(['email_verified' => 'true']))?->email)->toBe('member@example.org');
+});
+
+test('an unverified email is dropped but the sub still signs in', function () {
+    foreach ([['email_verified' => false], ['email_verified' => 'false']] as $overrides) {
+        $signIn = appleSignIn(appleToken($overrides));
+
+        expect($signIn?->sub)->toBe('000123.abc.456');
+        expect($signIn?->email)->toBeNull();
+    }
+
+    $signIn = appleSignIn(appleToken(remove: ['email_verified']));
+    expect($signIn?->sub)->toBe('000123.abc.456');
+    expect($signIn?->email)->toBeNull();
+});
+
+test('an empty email is treated as none', function () {
+    expect(appleSignIn(appleToken(['email' => '']))?->email)->toBeNull();
+});
+
+test('a private relay is recognised from the claim', function () {
+    expect(appleSignIn(appleToken(['is_private_email' => true]))?->isPrivateRelay)->toBeTrue();
+    expect(appleSignIn(appleToken(['is_private_email' => 'true']))?->isPrivateRelay)->toBeTrue();
+    expect(appleSignIn(appleToken(['is_private_email' => 'false']))?->isPrivateRelay)->toBeFalse();
+});
+
+test('a private relay is recognised from the address', function () {
+    $signIn = appleSignIn(appleToken(['email' => 'XYZ@PrivateRelay.AppleID.com']));
+
+    expect($signIn?->email)->toBe('xyz@privaterelay.appleid.com');
+    expect($signIn?->isPrivateRelay)->toBeTrue();
+});
+
+test('a token with an empty or missing sub is refused', function () {
+    expect(appleSignIn(appleToken(['sub' => ''])))->toBeNull();
+    expect(appleSignIn(appleToken(remove: ['sub'])))->toBeNull();
+});
+
+test('a token that fails verification is refused by verifySignIn', function () {
+    expect(appleSignIn(appleToken(['aud' => 'com.example.someone-else'])))->toBeNull();
+    expect(appleSignIn(appleToken(['iss' => 'https://accounts.google.com'])))->toBeNull();
+    expect(appleSignIn(appleToken(['nonce' => 'another-nonce'])))->toBeNull();
+    expect(appleSignIn(appleToken(['exp' => time() - 600])))->toBeNull();
+});
+
+test('verifySignIn checks the token against Apple', function () {
+    appleSignIn(appleToken());
+
+    expect(FakeWpHttp::sentUrl(0))->toBe('https://appleid.apple.com/auth/keys');
+});
+
+test('an Apple sign-in cannot be built without a sub', function () {
+    new AppleSignIn('', null, false);
+})->throws(\InvalidArgumentException::class);
+
+function appleSignIn(string $jwt): ?AppleSignIn
+{
+    FakeWpHttp::pushResponse(200, Tokens::jwksBody(Tokens::jwk(test()->key, APPLE_KID)));
+
+    return appleProvider()->verifySignIn($jwt, APPLE_NONCE);
+}
 
 function appleProvider(): AppleProvider
 {

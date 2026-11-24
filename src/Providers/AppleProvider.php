@@ -8,6 +8,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+use Guardian\AppleSignIn;
 use Guardian\Credentials\CredentialStore;
 use Guardian\Jwt\JwtVerifier;
 use Guardian\VerifiedIdentity;
@@ -106,5 +107,56 @@ final class AppleProvider implements OAuthProvider
             self::PROVIDER_NAME,
             (string) ($claims['sub'] ?? ''),
         );
+    }
+
+    /**
+     * Verify an Apple ID token that may carry no email.
+     *
+     * Apple sends the email reliably only on the first authorisation, so a
+     * returning user's token can lack one and {@see verifyIdToken()} refuses
+     * it. This checks the token exactly as that method does, then answers
+     * Apple's stable `sub` for the consumer to find its own record by, with
+     * the email only when it is present and verified.
+     *
+     * Null when the token fails verification or carries no `sub`. An
+     * unverified email is not a refusal here: it is dropped, and the sign-in
+     * stands on `sub` alone.
+     */
+    public function verifySignIn(string $idToken, string $nonce): ?AppleSignIn
+    {
+        $claims = $this->verifier->verify(
+            $idToken,
+            self::JWKS_URL,
+            self::ISSUER,
+            $this->credentials->getClientId(self::PROVIDER_NAME),
+            $nonce,
+        );
+
+        if ($claims === null) {
+            return null;
+        }
+
+        $sub = $claims['sub'] ?? null;
+        if (!is_string($sub) || $sub === '') {
+            return null;
+        }
+
+        $email = null;
+        $verified = $claims['email_verified'] ?? null;
+        if (
+            isset($claims['email'])
+            && is_string($claims['email'])
+            && $claims['email'] !== ''
+            && ($verified === true || $verified === 'true')
+        ) {
+            $email = strtolower($claims['email']);
+        }
+
+        $relayClaim = $claims['is_private_email'] ?? null;
+        $isPrivateRelay = $relayClaim === true
+            || $relayClaim === 'true'
+            || ($email !== null && str_ends_with($email, '@privaterelay.appleid.com'));
+
+        return new AppleSignIn($sub, $email, $isPrivateRelay);
     }
 }
